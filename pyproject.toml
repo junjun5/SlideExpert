@@ -1,0 +1,36 @@
+[project]
+name = "google-slide-agent"
+version = "0.1.0"
+description = "Google Slides Generation Agent with Brand Colors and Japanese Layouts"
+authors = [
+    {name = "Your Name", email = "your@email.com"},
+]
+dependencies = [
+    "google-adk>=1.15.0",
+    "python-dotenv",
+    "google-auth",
+    "google-auth-httplib2",
+    "google-api-python-client",
+    "httpx",
+    "anyio",
+    "asyncer",
+    "matplotlib",
+    "pandas",
+    # "agent-starter-pack==0.39.4",
+]
+requires-python = ">=3.10,<3.14"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["slide_app"]
+
+[tool.agent-starter-pack]
+name = "SlideExpert"
+description = "Googleブランドの美学に基づき、プロフェッショナルな日本ビジネススタイルのGoogle Slides資料を作成します。"
+base_template = "local_adk_agent"
+agent_directory = "slide_app"
+generated_at = "2026-03-24T12:00:00.000000+00:00"
+asp_version = "0.39.4"

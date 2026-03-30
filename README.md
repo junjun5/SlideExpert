@@ -20,7 +20,6 @@ Vertex AI Agent Engine (Reasoning Engine) 上にデプロイし、Gemini 3モデ
 
 ### 1. リポジトリのクローンとパッケージ構築
 ```bash
-git clone <YOUR_GITHUB_REPO_URL>
 cd google_slide_agent
 uv sync
 ```
