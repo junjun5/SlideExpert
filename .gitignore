@@ -1,0 +1,10 @@
+.venv/
+__pycache__/
+*.json
+deployment_metadata.json
+.env
+.adk/
+scratch/
+misc/
+uv.lock
+*.png
