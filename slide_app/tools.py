@@ -31,25 +31,47 @@ SLIDE_WIDTH = 10 * INCH
 SLIDE_HEIGHT = 5.625 * INCH # 16:9 aspect ratio
 
 # =============================================================================
-# Helper: Get Slides Service
+# Helper: Get API Services (Cached Singletons with Static Discovery)
 # =============================================================================
+
+_SLIDES_SERVICE = None
+_DRIVE_SERVICE = None
+_SHEETS_SERVICE = None
 
 def get_slides_service():
     """Returns an authorized Google Slides API service."""
-    scopes = [
-        "https://www.googleapis.com/auth/presentations",
-        "https://www.googleapis.com/auth/drive"
-    ]
-    credentials, _ = google.auth.default(scopes=scopes)
-    return build("slides", "v1", credentials=credentials)
+    global _SLIDES_SERVICE
+    if _SLIDES_SERVICE is None:
+        scopes = [
+            "https://www.googleapis.com/auth/presentations",
+            "https://www.googleapis.com/auth/drive"
+        ]
+        credentials, _ = google.auth.default(scopes=scopes)
+        _SLIDES_SERVICE = build("slides", "v1", credentials=credentials, static_discovery=True)
+    return _SLIDES_SERVICE
 
 def get_drive_service():
     """Returns an authorized Google Drive API service."""
-    scopes = [
-        "https://www.googleapis.com/auth/drive"
-    ]
-    credentials, _ = google.auth.default(scopes=scopes)
-    return build("drive", "v3", credentials=credentials)
+    global _DRIVE_SERVICE
+    if _DRIVE_SERVICE is None:
+        scopes = [
+            "https://www.googleapis.com/auth/drive"
+        ]
+        credentials, _ = google.auth.default(scopes=scopes)
+        _DRIVE_SERVICE = build("drive", "v3", credentials=credentials, static_discovery=True)
+    return _DRIVE_SERVICE
+
+def get_sheets_service():
+    """Returns an authorized Google Sheets API service."""
+    global _SHEETS_SERVICE
+    if _SHEETS_SERVICE is None:
+        scopes = [
+            "https://www.googleapis.com/auth/spreadsheets",
+            "https://www.googleapis.com/auth/drive"
+        ]
+        credentials, _ = google.auth.default(scopes=scopes)
+        _SHEETS_SERVICE = build("sheets", "v4", credentials=credentials, static_discovery=True)
+    return _SHEETS_SERVICE
 
 # =============================================================================
 # Tools
@@ -66,8 +88,11 @@ def create_google_presentation(title: str, folder_id: str = "1xqjbUZ28L13nJrLeFv
     Returns:
         dict: Information about the created presentation including presentationId and url.
     """
+    print("DEBUG: create_google_presentation starting...", flush=True)
     slides_service = get_slides_service()
+    print("DEBUG: slides_service acquired.", flush=True)
     drive_service = get_drive_service()
+    print("DEBUG: drive_service acquired.", flush=True)
     
     body = {"title": title}
     try:
@@ -84,13 +109,39 @@ def create_google_presentation(title: str, folder_id: str = "1xqjbUZ28L13nJrLeFv
         if folder_id:
             body["parents"] = [folder_id]
 
+        print("DEBUG: Sending create presentation request to Drive API...", flush=True)
         file = drive_service.files().create(
             body=body,
             supportsAllDrives=True, # Required for Shared Drives
             fields="id"
         ).execute()
+        print("DEBUG: Drive API request completed. File ID obtained.", flush=True)
         
         presentation_id = file.get("id")
+        
+        # 最初の自動生成スライド内のデフォルトプレースホルダー要素を全削除し、完全な白紙スライドへリセット
+        try:
+            pres_data = slides_service.presentations().get(presentationId=presentation_id).execute()
+            slides = pres_data.get("slides", [])
+            if slides:
+                first_slide = slides[0]
+                first_slide_id = first_slide["objectId"]
+                page_elements = first_slide.get("pageElements", [])
+                delete_reqs = []
+                for elem in page_elements:
+                    delete_reqs.append({
+                        "deleteObject": {
+                            "objectId": elem["objectId"]
+                        }
+                    })
+                if delete_reqs:
+                    slides_service.presentations().batchUpdate(
+                        presentationId=presentation_id,
+                        body={"requests": delete_reqs}
+                    ).execute()
+                    print(f"DEBUG: Successfully purged {len(delete_reqs)} default templates from first slide {first_slide_id}.", flush=True)
+        except Exception as e:
+            print(f"DEBUG: Non-blocking first slide placeholder purging warning: {e}", flush=True)
         
         return {
             "presentationId": presentation_id,
@@ -709,3 +760,661 @@ def generate_and_upload_plot_direct(code: str, folder_id: str = "1xqjbUZ28L13nJr
         }
     except Exception as e:
         return {"error": f"インメモリ画像生成/アップロード中にエラーが発生しました: {str(e)}"}
+
+
+def add_sheets_chart_from_data(
+    presentation_id: str,
+    slide_id: str,
+    data: list,
+    title: str = "Chart",
+    chart_type: str = "COLUMN",
+    x: float = None,
+    y: float = None,
+    width: float = None,
+    height: float = None,
+    spreadsheet_id: str = None
+) -> dict:
+    """
+    Google Sheets にデータを書き込んでグラフを作成し、それをスライドに挿入します。
+    
+    Args:
+        presentation_id (str): プレゼンテーションID。
+        slide_id (str): 挿入するスライドのID。
+        data (list): 書き込むデータ（二次元配列。1行目はヘッダー）。
+        title (str): グラフのタイトル。
+        chart_type (str): グラフの種類 ("BAR", "COLUMN", "LINE", "AREA", "SCATTER")。
+        x (float, optional): グラフを配置するX座標 (pt)。デフォルトは SLIDE_WIDTH * 0.1。
+        y (float, optional): グラフを配置するY座標 (pt)。デフォルトは SLIDE_HEIGHT * 0.2。
+        width (float, optional): グラフの横幅 (pt)。デフォルトは SLIDE_WIDTH * 0.8。
+        height (float, optional): グラフの高さ (pt)。デフォルトは SLIDE_HEIGHT * 0.6。
+        spreadsheet_id (str, optional): 既存のスプレッドシートID。指定された場合は新規作成せずシートを追加します。
+        
+    Returns:
+        dict: 実行結果。
+    """
+    import io
+    from googleapiclient.http import MediaIoBaseUpload
+    
+    slides_service = get_slides_service()
+    sheets_service = get_sheets_service()
+    drive_service = get_drive_service()
+    
+    try:
+        spreadsheet_id_provided = (spreadsheet_id is not None)
+        
+        # 1. スプレッドシートの準備
+        if spreadsheet_id_provided:
+            # 既存のスプレッドシートを使用。新しいユニークなシート（タブ）を追加する
+            import time
+            sheet_name = f"Chart_{int(time.time())}"
+            
+            add_sheet_request = {
+                "addSheet": {
+                    "properties": {
+                        "title": sheet_name
+                    }
+                }
+            }
+            batch_update_response = sheets_service.spreadsheets().batchUpdate(
+                spreadsheetId=spreadsheet_id,
+                body={"requests": [add_sheet_request]}
+            ).execute()
+            
+            sheet_id = batch_update_response["replies"][0]["addSheet"]["properties"]["sheetId"]
+        else:
+            # スプレッドシートの新規作成（フォールバック）
+            spreadsheet_body = {
+                "properties": {
+                    "title": f"TempChartData_{title}"
+                }
+            }
+            spreadsheet = sheets_service.spreadsheets().create(
+                body=spreadsheet_body,
+                fields="spreadsheetId"
+            ).execute()
+            spreadsheet_id = spreadsheet.get("spreadsheetId")
+            sheet_name = "Sheet1"
+            
+        # 2. データの書き込み
+        value_range_body = {
+            "values": data
+        }
+        sheets_service.spreadsheets().values().update(
+            spreadsheetId=spreadsheet_id,
+            range=f"'{sheet_name}'!A1",
+            valueInputOption="USER_ENTERED",
+            body=value_range_body
+        ).execute()
+        
+        # 新規作成時のみ共有設定を変更し、sheet_idを取得する
+        if not spreadsheet_id_provided:
+            # 2.5. スプレッドシートの共有権限を anyone/reader に変更（Slidesレンダリングエンジンへのデータアクセス許可）
+            drive_service.permissions().create(
+                fileId=spreadsheet_id,
+                body={
+                    "role": "reader",
+                    "type": "anyone"
+                }
+            ).execute()
+            
+            # シート情報の取得
+            sheet_metadata = sheets_service.spreadsheets().get(
+                spreadsheetId=spreadsheet_id
+            ).execute()
+            sheet_id = sheet_metadata["sheets"][0]["properties"]["sheetId"]
+        
+        # 3. グラフの作成
+        num_rows = len(data)
+        num_cols = len(data[0]) if num_rows > 0 else 0
+        
+        chart_spec = {
+            "title": title,
+            "basicChart": {
+                "chartType": chart_type,
+                "legendPosition": "BOTTOM_LEGEND",
+                "headerCount": 1,
+                "domains": [
+                    {
+                        "domain": {
+                            "sourceRange": {
+                                "sources": [
+                                    {
+                                        "sheetId": sheet_id,
+                                        "startRowIndex": 0,
+                                        "endRowIndex": num_rows,
+                                        "startColumnIndex": 0,
+                                        "endColumnIndex": 1
+                                    }
+                                ]
+                            }
+                        }
+                    }
+                ],
+                "series": []
+            }
+        }
+        
+        BRAND_COLORS = {
+            "BLUE": {"rgbColor": {"red": 0.10, "green": 0.45, "blue": 0.91}},
+            "RED": {"rgbColor": {"red": 0.85, "green": 0.19, "blue": 0.15}}
+        }
+        
+        COLOR_KEYS = ["BLUE", "RED"]
+        for col_idx in range(1, num_cols):
+            target_axis = "LEFT_AXIS"
+            color_key = COLOR_KEYS[(col_idx - 1) % len(COLOR_KEYS)]
+            chart_spec["basicChart"]["series"].append({
+                "series": {
+                    "sourceRange": {
+                        "sources": [
+                            {
+                                "sheetId": sheet_id,
+                                "startRowIndex": 0,
+                                "endRowIndex": num_rows,
+                                "startColumnIndex": col_idx,
+                                "endColumnIndex": col_idx + 1
+                            }
+                        ]
+                    }
+                },
+                "targetAxis": target_axis,
+                "colorStyle": BRAND_COLORS[color_key]
+            })
+            
+        add_chart_request = {
+            "addChart": {
+                "chart": {
+                    "spec": chart_spec,
+                    "position": {
+                        "overlayPosition": {
+                            "anchorCell": {
+                                "sheetId": sheet_id,
+                                "rowIndex": 0,
+                                "columnIndex": 3
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        res_chart = sheets_service.spreadsheets().batchUpdate(
+            spreadsheetId=spreadsheet_id,
+            body={"requests": [add_chart_request]}
+        ).execute()
+        
+        chart_id = res_chart["replies"][0]["addChart"]["chart"]["chartId"]
+        
+        # 4. グラフをスライドに挿入
+        PT_TO_EMU = 12700
+        
+        SLIDE_WIDTH = 9144000 / PT_TO_EMU   # approx 720 pt
+        SLIDE_HEIGHT = 5143500 / PT_TO_EMU  # approx 405 pt
+        
+        w_emu = width * PT_TO_EMU if width is not None else SLIDE_WIDTH * 0.8 * PT_TO_EMU
+        h_emu = height * PT_TO_EMU if height is not None else SLIDE_HEIGHT * 0.6 * PT_TO_EMU
+        x_emu = x * PT_TO_EMU if x is not None else SLIDE_WIDTH * 0.1 * PT_TO_EMU
+        y_emu = y * PT_TO_EMU if y is not None else SLIDE_HEIGHT * 0.2 * PT_TO_EMU
+
+        insert_chart_request = {
+            "createSheetsChart": {
+                "spreadsheetId": spreadsheet_id,
+                "chartId": chart_id,
+                "linkingMode": "LINKED",
+                "elementProperties": {
+                    "pageObjectId": slide_id,
+                    "size": {"width": {"magnitude": w_emu, "unit": "EMU"}, "height": {"magnitude": h_emu, "unit": "EMU"}},
+                    "transform": {"scaleX": 1.0, "scaleY": 1.0, "translateX": x_emu, "translateY": y_emu, "unit": "EMU"}
+                }
+            }
+        }
+        
+        slides_service.presentations().batchUpdate(
+            presentationId=presentation_id,
+            body={"requests": [insert_chart_request]}
+        ).execute()
+        
+        return {"status": "success", "sheetName": sheet_name, "chartId": chart_id}
+    except Exception as e:
+        return {"error": f"Error in add_sheets_chart_from_data: {str(e)}"}
+
+def create_blank_slide(presentation_id: str, slide_id: str = None) -> dict:
+    """
+    新規の白紙スライドを追加します。
+    
+    Args:
+        presentation_id (str): プレゼンテーションID。
+        slide_id (str, optional): 作成するスライドのオブジェクトID。事前に確定させたIDでスライドを作成したい場合に指定します。
+        
+    Returns:
+        dict: 作成結果（slideIdなど）。
+    """
+    service = get_slides_service()
+    if not slide_id:
+        slide_id = f"slide_{os.urandom(4).hex()}"
+    requests = [
+        {
+            "createSlide": {
+                "objectId": slide_id,
+                "slideLayoutReference": {"predefinedLayout": "BLANK"}
+            }
+        }
+    ]
+    try:
+        service.presentations().batchUpdate(
+            presentationId=presentation_id, 
+            body={"requests": requests}
+        ).execute()
+        return {"status": "success", "slideId": slide_id}
+    except Exception as e:
+        return {"error": str(e)}
+
+def add_custom_text_box(
+    presentation_id: str,
+    slide_id: str,
+    text: str,
+    x: float,
+    y: float,
+    width: float,
+    height: float,
+    font_family: str = "Noto Sans JP",
+    font_size: float = 14,
+    color_hex: str = "#45474C",
+    bold: bool = False
+) -> dict:
+    """
+    指定した位置とサイズ（単位: PT）にテキストボックスを作成し、文字を入力します。
+    """
+    text = text.replace('\\n', '\n').replace('\n', '\n')
+    
+    service = get_slides_service()
+    
+    # もし slide_id が "p" の場合、最初のスライドIDを動的に解決
+    if slide_id == "p":
+        try:
+            pres_info = service.presentations().get(presentationId=presentation_id).execute()
+            slides = pres_info.get("slides", [])
+            if slides:
+                slide_id = slides[0]["objectId"]
+        except Exception:
+            pass
+            
+    obj_id = f"text_{os.urandom(4).hex()}"
+    
+    PT_TO_EMU = 12700
+    
+    hex_str = color_hex.lstrip('#')
+    rgb = tuple(int(hex_str[i:i+2], 16) / 255.0 for i in (0, 2, 4))
+    
+    requests = [
+        {
+            "createShape": {
+                "objectId": obj_id,
+                "shapeType": "TEXT_BOX",
+                "elementProperties": {
+                    "pageObjectId": slide_id,
+                    "size": {
+                        "width": {"magnitude": width * PT_TO_EMU, "unit": "EMU"},
+                        "height": {"magnitude": height * PT_TO_EMU, "unit": "EMU"}
+                    },
+                    "transform": {
+                        "scaleX": 1.0, "scaleY": 1.0,
+                        "translateX": x * PT_TO_EMU,
+                        "translateY": y * PT_TO_EMU,
+                        "unit": "EMU"
+                    }
+                }
+            }
+        },
+        {
+            "insertText": {
+                "objectId": obj_id,
+                "text": text
+            }
+        },
+        {
+            "updateTextStyle": {
+                "objectId": obj_id,
+                "style": {
+                    "fontFamily": font_family,
+                    "fontSize": {"magnitude": font_size, "unit": "PT"},
+                    "foregroundColor": {"opaqueColor": {"rgbColor": {"red": rgb[0], "green": rgb[1], "blue": rgb[2]}}},
+                    "bold": bold
+                },
+                "textRange": {"type": "ALL"},
+                "fields": "fontFamily,fontSize,foregroundColor,bold"
+            }
+        }
+    ]
+    
+    try:
+        service.presentations().batchUpdate(
+            presentationId=presentation_id, 
+            body={"requests": requests}
+        ).execute()
+        return {"status": "success", "elementId": obj_id}
+    except Exception as e:
+        return {"error": str(e)}
+
+def add_custom_shape(
+    presentation_id: str,
+    slide_id: str,
+    shape_type: str,
+    x: float,
+    y: float,
+    width: float,
+    height: float,
+    fill_color_hex: str = "#030813",
+    text: str = None,
+    text_color_hex: str = None,
+    outline_color_hex: str = None,
+    outline_weight: float = 1.5,
+    font_size: float = 14
+) -> dict:
+    """
+    指定した位置とサイズ（単位: PT）に図形を作成し、色を適用します。
+    """
+    if shape_type == "ROUNDED_RECTANGLE":
+        shape_type = "ROUND_RECTANGLE"
+        
+    service = get_slides_service()
+    
+    # もし slide_id が "p" の場合、最初のスライドIDを動的に解決
+    if slide_id == "p":
+        try:
+            pres_info = service.presentations().get(presentationId=presentation_id).execute()
+            slides = pres_info.get("slides", [])
+            if slides:
+                slide_id = slides[0]["objectId"]
+        except Exception:
+            pass
+            
+    obj_id = f"shape_{os.urandom(4).hex()}"
+    
+    PT_TO_EMU = 12700
+    
+    hex_str = fill_color_hex.lstrip('#')
+    rgb = tuple(int(hex_str[i:i+2], 16) / 255.0 for i in (0, 2, 4))
+    
+    outline_properties = {
+        "propertyState": "NOT_RENDERED"
+    }
+    if outline_color_hex:
+        out_hex = outline_color_hex.lstrip('#')
+        out_rgb = tuple(int(out_hex[i:i+2], 16) / 255.0 for i in (0, 2, 4))
+        outline_properties = {
+            "outlineFill": {
+                "solidFill": {
+                    "color": {"rgbColor": {"red": out_rgb[0], "green": out_rgb[1], "blue": out_rgb[2]}},
+                    "alpha": 1.0
+                }
+            },
+            "weight": {"magnitude": int(outline_weight * PT_TO_EMU), "unit": "EMU"},
+            "propertyState": "RENDERED"
+        }
+    else:
+        outline_properties = {
+            "propertyState": "NOT_RENDERED"
+        }
+        
+    requests = [
+        {
+            "createShape": {
+                "objectId": obj_id,
+                "shapeType": shape_type,
+                "elementProperties": {
+                    "pageObjectId": slide_id,
+                    "size": {
+                        "width": {"magnitude": int(width * PT_TO_EMU), "unit": "EMU"},
+                        "height": {"magnitude": int(height * PT_TO_EMU), "unit": "EMU"}
+                    },
+                    "transform": {
+                        "scaleX": 1.0, "scaleY": 1.0,
+                        "translateX": int(x * PT_TO_EMU),
+                        "translateY": int(y * PT_TO_EMU),
+                        "unit": "EMU"
+                    }
+                }
+            }
+        },
+        {
+            "updateShapeProperties": {
+                "objectId": obj_id,
+                "shapeProperties": {
+                    "shapeBackgroundFill": {
+                        "solidFill": {
+                            "color": {"rgbColor": {"red": rgb[0], "green": rgb[1], "blue": rgb[2]}},
+                            "alpha": 1.0
+                        },
+                        "propertyState": "RENDERED"
+                    },
+                    "outline": outline_properties,
+                    "contentAlignment": "MIDDLE"
+                },
+                "fields": "shapeBackgroundFill.solidFill.color,shapeBackgroundFill.solidFill.alpha,shapeBackgroundFill.propertyState,outline,contentAlignment"
+            }
+        }
+    ]
+    
+    if text:
+        requests.append({
+            "insertText": {
+                "objectId": obj_id,
+                "text": text
+            }
+        })
+        
+        tc = text_color_hex
+        if not tc:
+            tc = "#202124" if fill_color_hex.upper() in ["#FFFFFF", "#FFF", "#F2F4F6"] else "#FFFFFF"
+            
+        tc_str = tc.lstrip('#')
+        tc_rgb = tuple(int(tc_str[i:i+2], 16) / 255.0 for i in (0, 2, 4))
+        
+        requests.append({
+            "updateTextStyle": {
+                "objectId": obj_id,
+                "style": {
+                    "fontFamily": "Noto Sans JP",
+                    "fontSize": {"magnitude": font_size, "unit": "PT"},
+                    "bold": True,
+                    "foregroundColor": {"opaqueColor": {"rgbColor": {"red": tc_rgb[0], "green": tc_rgb[1], "blue": tc_rgb[2]}}}
+                },
+                "fields": "fontFamily,fontSize,bold,foregroundColor"
+            }
+        })
+        
+        requests.append({
+            "updateParagraphStyle": {
+                "objectId": obj_id,
+                "style": {
+                    "alignment": "CENTER"
+                },
+                "fields": "alignment"
+            }
+        })
+        
+    try:
+        service.presentations().batchUpdate(
+            presentationId=presentation_id, 
+            body={"requests": requests}
+        ).execute()
+        return {"status": "success", "elementId": obj_id}
+    except Exception as e:
+        return {"error": str(e)}
+
+def get_slide_content(presentation_id: str, slide_id: str) -> dict:
+    """
+    指定したスライドの要素一覧（ID、テキスト、位置等）を取得します。
+    """
+    service = get_slides_service()
+    try:
+        page = service.presentations().pages().get(
+            presentationId=presentation_id,
+            pageObjectId=slide_id
+        ).execute()
+        
+        elements = page.get("pageElements", [])
+        result = []
+        
+        for el in elements:
+            el_info = {
+                "objectId": el.get("objectId"),
+                "type": el.get("shape", {}).get("shapeType") if "shape" in el else "OTHER",
+                "x": el.get("transform", {}).get("translateX", 0) / 12700,
+                "y": el.get("transform", {}).get("translateY", 0) / 12700,
+                "width": el.get("size", {}).get("width", {}).get("magnitude", 0) / 12700,
+                "height": el.get("size", {}).get("height", {}).get("magnitude", 0) / 12700,
+            }
+            
+            if "shape" in el and "text" in el["shape"]:
+                text_elements = el["shape"]["text"].get("textElements", [])
+                full_text = "".join([te.get("textRun", {}).get("content", "") for te in text_elements])
+                el_info["text"] = full_text.strip()
+                
+            result.append(el_info)
+            
+        return {"status": "success", "elements": result}
+    except Exception as e:
+        return {"error": str(e)}
+
+def update_text_element(presentation_id: str, element_id: str, text: str) -> dict:
+    """
+    特定のテキストボックスの文字を書き換えます。既存のテキストは削除されます。
+    """
+    service = get_slides_service()
+    text = text.replace('\\n', '\n')
+    
+    requests = [
+        {
+            "deleteText": {
+                "objectId": element_id,
+                "textRange": {"type": "ALL"}
+            }
+        },
+        {
+            "insertText": {
+                "objectId": element_id,
+                "text": text,
+                "insertionIndex": 0
+            }
+        }
+    ]
+    
+    try:
+        service.presentations().batchUpdate(
+            presentationId=presentation_id,
+            body={"requests": requests}
+        ).execute()
+        return {"status": "success"}
+    except Exception as e:
+        return {"error": str(e)}
+
+def update_element_transform(
+    presentation_id: str,
+    element_id: str,
+    x: float = None,
+    y: float = None
+) -> dict:
+    """
+    特定の要素の位置（X, Y）を移動します。単位は PT です。
+    """
+    service = get_slides_service()
+    PT_TO_EMU = 12700
+    
+    transform = {
+        "scaleX": 1.0,
+        "scaleY": 1.0,
+        "shearX": 0.0,
+        "shearY": 0.0,
+        "unit": "EMU"
+    }
+    
+    if x is not None:
+        transform["translateX"] = x * PT_TO_EMU
+    if y is not None:
+        transform["translateY"] = y * PT_TO_EMU
+        
+    requests = [
+        {
+            "updatePageElementTransform": {
+                "objectId": element_id,
+                "transform": transform,
+                "applyMode": "ABSOLUTE"
+            }
+        }
+    ]
+    
+    try:
+        service.presentations().batchUpdate(
+            presentationId=presentation_id,
+            body={"requests": requests}
+        ).execute()
+        return {"status": "success"}
+    except Exception as e:
+        return {"error": str(e)}
+
+def delete_slide_element(presentation_id: str, element_id: str) -> dict:
+    """
+    特定の要素（テキストボックス、図形、グラフなど）を削除します。
+    """
+    service = get_slides_service()
+    requests = [
+        {
+            "deleteObject": {
+                "objectId": element_id
+            }
+        }
+    ]
+    try:
+        service.presentations().batchUpdate(
+            presentationId=presentation_id,
+            body={"requests": requests}
+        ).execute()
+        return {"status": "success"}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def export_slide_to_png(
+    presentation_id: str,
+    slide_id: str,
+    output_png_path: str
+) -> dict:
+    """
+    Google Slides API を用いて、特定のスライドページをPNG画像としてエクスポートし、ローカルに保存します。
+    
+    Args:
+        presentation_id (str): プレゼンテーションID。
+        slide_id (str): スライドID。
+        output_png_path (str): 出力先のPNG画像ファイルパス（絶対パス）。
+        
+    Returns:
+        dict: 実行結果。
+    """
+    import requests
+    import os
+    service = get_slides_service()
+    try:
+        thumbnail = service.presentations().pages().getThumbnail(
+            presentationId=presentation_id,
+            pageObjectId=slide_id
+        ).execute()
+        
+        content_url = thumbnail.get("contentUrl")
+        if not content_url:
+            return {"error": "Could not retrieve thumbnail URL"}
+            
+        response = requests.get(content_url)
+        if response.status_code != 200:
+            return {"error": f"Failed to download image from URL: {response.status_code}"}
+            
+        # 親ディレクトリを作成
+        os.makedirs(os.path.dirname(output_png_path), exist_ok=True)
+        
+        with open(output_png_path, "wb") as f:
+            f.write(response.content)
+            
+        return {"status": "success", "output_path": output_png_path}
+    except Exception as e:
+        return {"error": str(e)}

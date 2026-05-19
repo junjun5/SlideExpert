@@ -17,7 +17,7 @@ class AgentEngineApp(AdkApp):
         logging.basicConfig(level=logging.INFO)
 
 # Configuration for Agent Engine
-PROJECT_ID = "YOUR_PROJECT_ID"
+PROJECT_ID = "agentspace-469000"
 LOCATION = os.getenv("GOOGLE_CLOUD_LOCATION", "us-central1")
 
 # Minimal wrapper for Reasoning Engine

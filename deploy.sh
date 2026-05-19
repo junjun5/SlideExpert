@@ -1,38 +1,30 @@
 #!/bin/bash
-set -e
-
-PROJECT_ID="YOUR_PROJECT_ID"
-DISPLAY_NAME="SlideExpert"
 
 echo "========================================================="
-echo "🚀 DEPLOYING GOOGLE SLIDE AGENT TO VERTEX AI"
+echo "🚀 DEPLOYING SLIDE EXPERT (GE / A2A PERFECT MODE)"
 echo "========================================================="
 
-# Check for uv
-if ! command -v uv &> /dev/null; then
-    echo "🔧 Installing uv..."
-    curl -LsSf https://astral.sh/uv/install.sh | sh
-    source $HOME/.local/bin/env
-fi
+# 1. Cloud Run への直接展開
+echo "🤖 Step 1/2: Deploying container to Cloud Run..."
+gcloud beta run deploy google-slide-agent \
+  --project agentspace-469000 \
+  --region us-east1 \
+  --source . \
+  --memory 4Gi \
+  --no-allow-unauthenticated \
+  --no-cpu-throttling \
+  --update-env-vars AGENT_VERSION=0.1.0,APP_URL=https://google-slide-agent-989491130286.us-east1.run.app \
+  --labels created-by=adk \
+  --quiet
 
-# Sync dependencies
-echo "📦 Syncing dependencies..."
-uv sync
+# 2. 登録用トークンの取得
+echo "🔑 Fetching access token for registration..."
+TOKEN=$(gcloud auth application-default print-access-token 2>/dev/null || gcloud auth print-access-token)
 
-# Deploy to Agent Engine (Reasoning Engine)
-echo "🤖 Step 1/2: Deploying to Vertex AI Agent Engine..."
-make deploy
+# 3. Discovery Engine API への直接登録
+echo "🤖 Step 2/2: Registering agent to Discovery Engine API..."
+python3 register_agent.py "$TOKEN"
 
-# Register to Gemini Enterprise
-echo ""
-echo "🤖 Step 2/2: Registering Agent to Gemini Enterprise..."
-echo "Note: This part is interactive. Please follow the prompts."
-make register-gemini-enterprise
-
-echo ""
 echo "========================================================="
-echo "🎉 Deployment & Registration Process Initiated!"
-echo "========================================================="
-echo "Check your Google Cloud Console for status:"
-echo "https://console.cloud.google.com/vertex-ai/agents/agent-engines?project=$PROJECT_ID"
+echo "🎉 Perfect Deployment Complete!"
 echo "========================================================="

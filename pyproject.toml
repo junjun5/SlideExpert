@@ -6,7 +6,7 @@ authors = [
     {name = "Your Name", email = "your@email.com"},
 ]
 dependencies = [
-    "google-adk>=1.15.0",
+    "google-adk[a2a]>=1.15.0,<2.0.0",
     "python-dotenv",
     "google-auth",
     "google-auth-httplib2",
@@ -17,6 +17,13 @@ dependencies = [
     "matplotlib",
     "pandas",
     # "agent-starter-pack==0.39.4",
+    "a2ui-agent-sdk>=0.2.1",
+    "a2a-protocol",
+    "gcsfs>=2024.11.0",
+    "google-cloud-aiplatform[agent-engines,evaluation]>=1.130.0",
+    "google-cloud-logging>=3.12.0,<4.0.0",
+    "opentelemetry-instrumentation-google-genai>=0.1.0,<1.0.0",
+    "protobuf>=6.31.1,<7.0.0",
 ]
 requires-python = ">=3.10,<3.14"
 
@@ -26,11 +33,25 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["slide_app"]
+include = [
+    "slide_app/**/*.py",
+    "slide_app/**/*.md",
+    "slide_app/**/*.json",
+]
 
-[tool.agent-starter-pack]
+[tool.agents-cli]
 name = "SlideExpert"
 description = "Googleブランドの美学に基づき、プロフェッショナルな日本ビジネススタイルのGoogle Slides資料を作成します。"
-base_template = "local_adk_agent"
+base_template = "adk_a2a"
 agent_directory = "slide_app"
 generated_at = "2026-03-24T12:00:00.000000+00:00"
-asp_version = "0.39.4"
+acli_version = "0.1.3"
+
+[tool.agents-cli.create_params]
+deployment_target = "cloud_run"
+is_a2a = true
+
+[[tool.uv.index]]
+name = "pypi"
+url = "https://pypi.org/simple"
+default = true

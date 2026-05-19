@@ -54,7 +54,7 @@ def print_deployment_success(remote_agent: Any, location: str, project: str) -> 
     print(f"\n📊 Open Console Playground: {playground_url}\n")
 
 @click.command()
-@click.option("--project", default="YOUR_PROJECT_ID")
+@click.option("--project", default="agentspace-469000")
 @click.option("--location", default="us-central1")
 @click.option("--display-name", default="SlideExpert")
 @click.option("--description", default="Googleブランドの美学に基づき、プロフェッショナルな日本ビジネススタイルのGoogle Slides資料を作成します。")
@@ -88,7 +88,7 @@ def deploy_agent_engine_app(project, location, display_name, description, source
         class_methods=class_methods_list,
         env_vars=env_vars,
         requirements_file=requirements_file,
-        # service_account="YOUR_SERVICE_ACCOUNT@YOUR_PROJECT_ID.iam.gserviceaccount.com",
+        # service_account="YOUR_SERVICE_ACCOUNT@agentspace-469000.iam.gserviceaccount.com",
         agent_framework="google-adk",
     )
 

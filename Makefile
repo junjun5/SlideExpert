@@ -1,4 +1,4 @@
-PROJECT_ID := YOUR_PROJECT_ID
+PROJECT_ID := agentspace-469000
 LOCATION := us-central1
 AGENT_NAME := slide_agent
 APP_NAME := slide_agent_app
