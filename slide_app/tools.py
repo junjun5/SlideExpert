@@ -466,8 +466,72 @@ def _get_section_slide_requests(slide_id, title):
 
 def _get_image_slide_requests(slide_id, title, key_message, body, image_url):
     reqs = []
+    POINT = INCH // 72
     
-    # 1. Slide Title (Reduced Width)
+    # =========================================================================
+    # 1. 右上プレミアムブランド装飾 (Decorative Overlapping Translucent Circles)
+    # =========================================================================
+    # Circle 1: Outer Soft Blue
+    c1_id = f"dec_c1_{slide_id}"
+    reqs.append({
+        "createShape": {
+            "objectId": c1_id,
+            "shapeType": "ELLIPSE",
+            "elementProperties": {
+                "pageObjectId": slide_id,
+                "size": {"width": {"magnitude": 280 * POINT, "unit": "EMU"}, "height": {"magnitude": 280 * POINT, "unit": "EMU"}},
+                "transform": {"scaleX": 1, "scaleY": 1, "translateX": 560 * POINT, "translateY": -100 * POINT, "unit": "EMU"}
+            }
+        }
+    })
+    reqs.append({
+        "updateShapeProperties": {
+            "objectId": c1_id,
+            "shapeProperties": {
+                "shapeBackgroundFill": {
+                    "solidFill": {
+                        "color": {"rgbColor": {"red": 0.258, "green": 0.521, "blue": 0.957}},  # #4285F4 (Google Blue)
+                        "alpha": 0.12
+                    }
+                },
+                "outline": {"outlineFill": {"solidFill": {"alpha": 0}}}
+            },
+            "fields": "shapeBackgroundFill.solidFill,outline"
+        }
+    })
+
+    # Circle 2: Inner Soft Green/Emerald
+    c2_id = f"dec_c2_{slide_id}"
+    reqs.append({
+        "createShape": {
+            "objectId": c2_id,
+            "shapeType": "ELLIPSE",
+            "elementProperties": {
+                "pageObjectId": slide_id,
+                "size": {"width": {"magnitude": 220 * POINT, "unit": "EMU"}, "height": {"magnitude": 220 * POINT, "unit": "EMU"}},
+                "transform": {"scaleX": 1, "scaleY": 1, "translateX": 610 * POINT, "translateY": -60 * POINT, "unit": "EMU"}
+            }
+        }
+    })
+    reqs.append({
+        "updateShapeProperties": {
+            "objectId": c2_id,
+            "shapeProperties": {
+                "shapeBackgroundFill": {
+                    "solidFill": {
+                        "color": {"rgbColor": {"red": 0.203, "green": 0.658, "blue": 0.325}},  # #34A853 (Google Green)
+                        "alpha": 0.15
+                    }
+                },
+                "outline": {"outlineFill": {"solidFill": {"alpha": 0}}}
+            },
+            "fields": "shapeBackgroundFill.solidFill,outline"
+        }
+    })
+
+    # =========================================================================
+    # 2. 左側：大見出し (Slide Title)
+    # =========================================================================
     title_id = f"title_{slide_id}"
     reqs.append({
         "createShape": {
@@ -475,55 +539,60 @@ def _get_image_slide_requests(slide_id, title, key_message, body, image_url):
             "shapeType": "TEXT_BOX",
             "elementProperties": {
                 "pageObjectId": slide_id,
-                "size": {"width": {"magnitude": SLIDE_WIDTH * 0.9, "unit": "EMU"}, "height": {"magnitude": 0.6 * INCH, "unit": "EMU"}},
-                "transform": {"scaleX": 1, "scaleY": 1, "translateX": 0.5 * INCH, "translateY": 0.3 * INCH, "unit": "EMU"}
+                "size": {"width": {"magnitude": 330 * POINT, "unit": "EMU"}, "height": {"magnitude": 60 * POINT, "unit": "EMU"}},
+                "transform": {"scaleX": 1, "scaleY": 1, "translateX": 40 * POINT, "translateY": 40 * POINT, "unit": "EMU"}
             }
         }
     })
     reqs.append({"insertText": {"objectId": title_id, "text": title}})
     reqs.append({
         "updateTextStyle": {
-            "objectId": title_id, 
-            "style": {"fontSize": {"magnitude": 24, "unit": "PT"}, "bold": True, "foregroundColor": {"opaqueColor": {"rgbColor": BRAND_COLORS["GREY_DARK"]}}},
+            "objectId": title_id,
+            "style": {
+                "fontSize": {"magnitude": 28, "unit": "PT"},
+                "bold": True,
+                "foregroundColor": {"opaqueColor": {"rgbColor": BRAND_COLORS["GREY_DARK"]}}
+            },
             "textRange": {"type": "ALL"},
             "fields": "fontSize,bold,foregroundColor"
         }
     })
 
-    # Accent border
-    border_id = f"border_{slide_id}"
-    reqs.append({
-        "createShape": {
-            "objectId": border_id,
-            "shapeType": "RECTANGLE",
-            "elementProperties": {
-                "pageObjectId": slide_id,
-                "size": {"width": {"magnitude": 6, "unit": "PT"}, "height": {"magnitude": 0.4 * INCH, "unit": "EMU"}},
-                "transform": {"scaleX": 1, "scaleY": 1, "translateX": 0.3 * INCH, "translateY": 0.4 * INCH, "unit": "EMU"}
-            }
-        }
-    })
-    reqs.append({"updateShapeProperties": {"objectId": border_id, "shapeProperties": {"shapeBackgroundFill": {"solidFill": {"color": {"rgbColor": BRAND_COLORS["BLUE"]}}}, "outline": {"outlineFill": {"solidFill": {"alpha": 0}}}}, "fields": "shapeBackgroundFill.solidFill.color,outline"}})
-
-    # 2. Key Message Box (Left side)
+    # =========================================================================
+    # 3. 左側：中見出し・キーメッセージ (Key Message)
+    # =========================================================================
+    y_offset = 110
     if key_message:
         km_id = f"km_{slide_id}"
         reqs.append({
             "createShape": {
                 "objectId": km_id,
-                "shapeType": "RECTANGLE",
+                "shapeType": "TEXT_BOX",
                 "elementProperties": {
                     "pageObjectId": slide_id,
-                    "size": {"width": {"magnitude": SLIDE_WIDTH * 0.9, "unit": "EMU"}, "height": {"magnitude": 0.8 * INCH, "unit": "EMU"}},
-                    "transform": {"scaleX": 1, "scaleY": 1, "translateX": 0.5 * INCH, "translateY": 1.0 * INCH, "unit": "EMU"}
+                    "size": {"width": {"magnitude": 300 * POINT, "unit": "EMU"}, "height": {"magnitude": 60 * POINT, "unit": "EMU"}},
+                    "transform": {"scaleX": 1, "scaleY": 1, "translateX": 40 * POINT, "translateY": 110 * POINT, "unit": "EMU"}
                 }
             }
         })
-        reqs.append({"updateShapeProperties": {"objectId": km_id, "shapeProperties": {"shapeBackgroundFill": {"solidFill": {"color": {"rgbColor": BRAND_COLORS["GREY_LIGHT"]}}}, "outline": {"weight": {"magnitude": 1, "unit": "PT"}, "outlineFill": {"solidFill": {"color": {"rgbColor": {"red": 0.9, "green": 0.9, "blue": 0.9}}}}}}, "fields": "shapeBackgroundFill.solidFill.color,outline"}})
         reqs.append({"insertText": {"objectId": km_id, "text": key_message}})
-        reqs.append({"updateTextStyle": {"objectId": km_id, "style": {"fontSize": {"magnitude": 12, "unit": "PT"}, "italic": True, "foregroundColor": {"opaqueColor": {"rgbColor": BRAND_COLORS["GREY_DARK"]}}}, "textRange": {"type": "ALL"}, "fields": "fontSize,italic,foregroundColor"}})
+        reqs.append({
+            "updateTextStyle": {
+                "objectId": km_id,
+                "style": {
+                    "fontSize": {"magnitude": 18, "unit": "PT"},
+                    "bold": True,
+                    "foregroundColor": {"opaqueColor": {"rgbColor": {"red": 0.13, "green": 0.13, "blue": 0.14}}}
+                },
+                "textRange": {"type": "ALL"},
+                "fields": "fontSize,bold,foregroundColor"
+            }
+        })
+        y_offset = 180
 
-    # 3. Body Text (Left side)
+    # =========================================================================
+    # 4. 左側：箇条書き本文 (Body Text with proper bullet marks)
+    # =========================================================================
     if body:
         body_id = f"body_{slide_id}"
         reqs.append({
@@ -532,36 +601,79 @@ def _get_image_slide_requests(slide_id, title, key_message, body, image_url):
                 "shapeType": "TEXT_BOX",
                 "elementProperties": {
                     "pageObjectId": slide_id,
-                    "size": {"width": {"magnitude": SLIDE_WIDTH * 0.45, "unit": "EMU"}, "height": {"magnitude": 2.5 * INCH, "unit": "EMU"}},
-                    "transform": {"scaleX": 1, "scaleY": 1, "translateX": 0.5 * INCH, "translateY": 2.0 * INCH, "unit": "EMU"}
+                    "size": {"width": {"magnitude": 300 * POINT, "unit": "EMU"}, "height": {"magnitude": 200 * POINT, "unit": "EMU"}},
+                    "transform": {"scaleX": 1, "scaleY": 1, "translateX": 40 * POINT, "translateY": y_offset * POINT, "unit": "EMU"}
                 }
             }
         })
-        # * や - を ・ に変換（日本ビジネス用）
-        body_sanitized = body.replace('* ', '・ ').replace('- ', '・ ')
         
-        # Remove bullet '・' if it precedes '【'
+        # * や - を ・ に変換し、プロフェッショナルな箇条書きにする
+        body_sanitized = body.replace('* ', '・ ').replace('- ', '・ ')
         lines = body_sanitized.split('\n')
         new_lines = []
         for l in lines:
-            if l.strip().startswith('・ 【'):
+            stripped = l.strip()
+            if stripped.startswith('・ 【'):
                 new_lines.append(l.replace('・ 【', '【'))
+            elif stripped and not stripped.startswith('・') and not stripped.startswith('【'):
+                new_lines.append(f"・ {stripped}")
             else:
                 new_lines.append(l)
         body_sanitized = '\n'.join(new_lines)
+        
         reqs.append({"insertText": {"objectId": body_id, "text": body_sanitized}})
-        reqs.append({"updateTextStyle": {"objectId": body_id, "style": {"fontSize": {"magnitude": 12, "unit": "PT"}, "foregroundColor": {"opaqueColor": {"rgbColor": BRAND_COLORS["GREY_DARK"]}}}, "textRange": {"type": "ALL"}, "fields": "fontSize,foregroundColor"}})
+        reqs.append({
+            "updateTextStyle": {
+                "objectId": body_id,
+                "style": {
+                    "fontSize": {"magnitude": 13, "unit": "PT"},
+                    "foregroundColor": {"opaqueColor": {"rgbColor": {"red": 0.24, "green": 0.25, "blue": 0.26}}}
+                },
+                "textRange": {"type": "ALL"},
+                "fields": "fontSize,foregroundColor"
+            }
+        })
 
-    # 4. Image Position (Right side)
+    # =========================================================================
+    # 5. 右側：画像 (Premium Framed Image Layout)
+    # =========================================================================
     if image_url:
+        # 画像境界線シャドウまたはボーダー用の背後パネル (角丸ライトグレー)
+        bg_panel_id = f"img_bg_{slide_id}"
+        reqs.append({
+            "createShape": {
+                "objectId": bg_panel_id,
+                "shapeType": "ROUNDED_RECTANGLE",
+                "elementProperties": {
+                    "pageObjectId": slide_id,
+                    "size": {"width": {"magnitude": 320 * POINT, "unit": "EMU"}, "height": {"magnitude": 250 * POINT, "unit": "EMU"}},
+                    "transform": {"scaleX": 1, "scaleY": 1, "translateX": 365 * POINT, "translateY": 100 * POINT, "unit": "EMU"}
+                }
+            }
+        })
+        reqs.append({
+            "updateShapeProperties": {
+                "objectId": bg_panel_id,
+                "shapeProperties": {
+                    "shapeBackgroundFill": {"solidFill": {"color": {"rgbColor": {"red": 0.98, "green": 0.98, "blue": 0.98}}}},
+                    "outline": {
+                        "weight": {"magnitude": 1, "unit": "PT"},
+                        "outlineFill": {"solidFill": {"color": {"rgbColor": {"red": 0.85, "green": 0.85, "blue": 0.85}}}}
+                    }
+                },
+                "fields": "shapeBackgroundFill.solidFill,outline"
+            }
+        })
+
+        # 実際の画像 (少し小さく配置してボーダーのように見せる)
         reqs.append({
             "createImage": {
                 "objectId": f"image_{slide_id}",
                 "url": image_url,
                 "elementProperties": {
                     "pageObjectId": slide_id,
-                    "size": {"width": {"magnitude": SLIDE_WIDTH * 0.45, "unit": "EMU"}, "height": {"magnitude": SLIDE_HEIGHT * 0.6, "unit": "EMU"}},
-                    "transform": {"scaleX": 1, "scaleY": 1, "translateX": SLIDE_WIDTH * 0.5, "translateY": SLIDE_HEIGHT * 0.35, "unit": "EMU"}
+                    "size": {"width": {"magnitude": 310 * POINT, "unit": "EMU"}, "height": {"magnitude": 240 * POINT, "unit": "EMU"}},
+                    "transform": {"scaleX": 1, "scaleY": 1, "translateX": 370 * POINT, "translateY": 105 * POINT, "unit": "EMU"}
                 }
             }
         })

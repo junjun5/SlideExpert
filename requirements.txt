@@ -6,3 +6,5 @@ google-api-python-client
 httpx
 anyio
 asyncer
+beautifulsoup4
+lxml

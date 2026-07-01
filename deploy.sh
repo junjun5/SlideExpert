@@ -13,6 +13,7 @@ gcloud beta run deploy google-slide-agent \
   --memory 4Gi \
   --no-allow-unauthenticated \
   --no-cpu-throttling \
+  --min-instances 1 \
   --update-env-vars AGENT_VERSION=0.1.0,APP_URL=https://google-slide-agent-989491130286.us-east1.run.app \
   --labels created-by=adk \
   --quiet

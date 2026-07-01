@@ -21,6 +21,7 @@ from google.genai import types
 from google.adk.apps.app import App, EventsCompactionConfig
 from google.adk.agents.context_cache_config import ContextCacheConfig
 from google.adk.plugins import ReflectAndRetryToolPlugin, LoggingPlugin
+from google.adk.tools.load_web_page import load_web_page
 
 dotenv.load_dotenv(override=True)
 
@@ -192,6 +193,19 @@ AIは、その短い入力を受け取った際、裏側で自動的に **「ビ
 - `add_custom_shape(presentation_id: str, slide_id: str, shape_type: str, x: float, y: float, width: float, height: float, fill_color_hex: str = "#F8F9FA", text: str = None, text_color_hex: str = None, outline_color_hex: str = None, outline_weight: float = 1.5, font_size: float = 14) -> dict`: 指定した位置とサイズ（単位: PT）に図形を作成し、色を適用します。必要に応じて埋め込みテキスト（`text`）とその文字サイズ（`font_size`）を指定できます。
   - `fill_color_hex`: デフォルト値は上品なライトグレー `#F8F9FA` です。極めて淡いブルー `#E8F0FE` もご活用ください。漆黒や闇ネイビー（#030813）などの威圧的な暗色塗布は避けてください。
   - `font_size`: 図形にテキストを直接埋め込む場合のフォントサイズを指定します。表紙のメインタイトルの場合は必ず大きなサイズ（例: `32` 以上）を指定して強調してください。
+
+- `add_structured_slide(presentation_id: str, slide_type: str, title: str, key_message: str = "", body_text: str = "", image_url: str | None = None) -> dict`: 構造化されたプレミアムスライドを追加します。テキストや画像の配置が綺麗に自動設計されたスライドを簡単に作成できます。
+  - `slide_type`: スライドのレイアウト種類を指定します。以下のいずれかです：
+    - `"TITLE"`: 美しい表紙スライド。
+    - `"SECTION"`: 区分（セクション）ヘッダースライド。
+    - `"CONTENT"`: 日本のプロフェッショナルビジネススタイルに最適化された、メインメッセージと箇取り本文が綺麗に配置される通常スライド。
+    - `"IMAGE"`: 画像付き2カラムスライド。右側に指定された画像、左側にタイトル、キーメッセージ、箇条書き本文が美しく配置されます。
+  - `title`: スライドのタイトル。
+  - `key_message`: スライドのメインメッセージ・要約（任意）。
+  - `body_text`: スライドの箇条書き本文（任意）。
+  - `image_url`: 挿入する画像のWeb公開URL。Webページ上の画像を引用する際、`load_web_page` などの実行結果（Markdown）から画像URL (`![alt](url)`) を見つけ出してこのパラメータに指定します。
+
+- `load_web_page(url: str) -> str`: 指定されたURLのコンテンツを取得し、そのテキスト内容を返します。インターネット上の最新情報や詳細なドキュメントを参照してスライドのコンテンツを充実させるために使用します。
 
 ### 3. Data Visualization Protocol (Strict Enforcement)
 グラフを生成する際は、以下のルールを厳守してください。
@@ -382,9 +396,10 @@ plt.rcParams['axes.unicode_minus'] = False
         - 必ず `add_custom_shape` の `text` 引数に直接数字（例: `"1"`, `"2"`, `"3"`) を指定して一発で完璧な中央配置で埋め込んでください。これにより重心のズレを物理的に 100% 防止します。
       - **左右テキストの埋め込み強制**:
         - 左側の時期バッジ、右側の詳細カードについても、上に別テキストボックスを重ねるのではなく、必ず `add_custom_shape` の `text` 引数を使って直接テキストを埋め込んでください。
-    - **画像生成ツールの禁止 (CRITICAL: NO IMAGE GENERATION)**:
-      - **画像生成ツール（`generate_image` 等）は SlideExpert エージェントには提供されていません。絶対に呼び出さないでください。**
-      - スライド上のすべての視覚表現は、`add_custom_shape` による幾何学図形、`add_sheets_chart_from_data` によるグラフ、およびテキストボックスの完璧なレイアウトだけで構築してください。
+    - **画像生成の禁止と既存Web画像の引用活用 (CRITICAL: NO IMAGE GENERATION, USE WEB IMAGES)**:
+      - **画像生成ツール（`generate_image` 等）は提供されていません。AI自身が画像を「新しく生成」することは絶対にしないでください。**
+      - **しかし、まとめ対象のWebサイトやブログに掲載されている「既存の画像」を引用してスライドに挿入することは【強力に推奨】されます。**
+      - `load_web_page` で取得したコンテンツ内に画像（例: `![alt](url)`）が含まれている場合、その `url` を抽出し、`add_structured_slide` の `image_url` 引数に指定してください。そして `slide_type="IMAGE"` を使って呼び出すことで、右側に引用画像、左側にテキストが綺麗にレイアウトされた2カラム構成の画像付きスライドが自動的に作成されます。
 3. **マルチツールコール（一括並行実行）の強制 (最重要・作成途切れ防止)**:
    - スライドを作成する際、ツールを1回につき1つだけ呼び出す「逐次実行」は **絶対に避けてください**。往復回数が多すぎてプラットフォームのターン数制限（Max Rounds Limit）に達し、作成が途中でブツ切りに打ち切られる直接の原因になります。
    - 必ず、承認された全スライド（表紙〜最後のスライドまで）の作成に必要な **すべての `create_blank_slide`、`add_custom_shape`、`add_custom_text_box` 等のツール呼び出しを、1回のレスポンスの `function_calls` 配列の中に一括して並行出力し、一撃で送信・実行** してください。これにより、わずか 1〜2 往復で提案された全ページを漏れなく 100% 完成させることができます。
@@ -662,7 +677,7 @@ _RETRY_OPTIONS = types.HttpRetryOptions(
 )
 
 gemini_model = Gemini(
-    model=os.environ.get("AGENT_MODEL", "gemini-3.1-pro-preview"), 
+    model=os.environ.get("AGENT_MODEL", "gemini-3.5-flash"), 
     retry_options=_RETRY_OPTIONS
 )
 
@@ -676,7 +691,9 @@ root_agent = LlmAgent(
         tools.add_sheets_chart_from_data,
         tools.create_blank_slide,
         tools.add_custom_text_box,
-        tools.add_custom_shape
+        tools.add_custom_shape,
+        tools.add_structured_slide,
+        load_web_page
     ],
     after_model_callback=[a2ui_metadata_callback]
 )
